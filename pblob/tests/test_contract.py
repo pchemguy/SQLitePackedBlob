@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import re
 import sqlite3
 
 import pytest
 
+
+Scalar = Callable[[str, tuple[object, ...]], object]
 
 FORMATS = ("<f2", ">f2", "<f4", ">f4")
 
@@ -38,11 +41,11 @@ def test_registered_sql_variants(db: sqlite3.Connection) -> None:
     ids=["pack-default", "pack-explicit", "unpack"],
 )
 def test_sql_result_types(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     sql: str,
     expected_type: str,
 ) -> None:
-    assert scalar(db, sql) == expected_type
+    assert scalar(sql) == expected_type
 
 
 @pytest.mark.parametrize(
@@ -54,8 +57,11 @@ def test_sql_result_types(
     ],
     ids=["pack-default", "pack-explicit", "unpack"],
 )
-def test_null_propagation(db: sqlite3.Connection, sql: str) -> None:
-    assert scalar(db, sql) is None
+def test_null_propagation(
+    scalar: Scalar,
+    sql: str,
+) -> None:
+    assert scalar(sql) is None
 
 
 @pytest.mark.parametrize(
@@ -68,12 +74,15 @@ def test_null_propagation(db: sqlite3.Connection, sql: str) -> None:
     ids=["integer", "real", "blob"],
 )
 def test_pack_rejects_non_text_json_argument(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     value: object,
     message: str,
 ) -> None:
-    with pytest.raises(sqlite3.OperationalError, match=rf"^{re.escape(message)}$"):
-        scalar(db, "SELECT pblob_pack(?)", (value,))
+    with pytest.raises(
+        sqlite3.OperationalError,
+        match=rf"^{re.escape(message)}$",
+    ):
+        scalar("SELECT pblob_pack(?)", (value,))
 
 
 @pytest.mark.parametrize(
@@ -82,20 +91,28 @@ def test_pack_rejects_non_text_json_argument(
     ids=["integer", "real", "text"],
 )
 def test_unpack_rejects_non_blob_argument(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     value: object,
 ) -> None:
     message = "pblob_unpack() argument must be BLOB"
-    with pytest.raises(sqlite3.OperationalError, match=rf"^{re.escape(message)}$"):
-        scalar(db, "SELECT pblob_unpack(?)", (value,))
+
+    with pytest.raises(
+        sqlite3.OperationalError,
+        match=rf"^{re.escape(message)}$",
+    ):
+        scalar("SELECT pblob_unpack(?)", (value,))
 
 
 @pytest.mark.parametrize("format_", FORMATS)
 def test_all_explicit_formats_are_accepted(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     format_: str,
 ) -> None:
-    result = scalar(db, "SELECT pblob_pack('[1]', ?)", (format_,))
+    result = scalar(
+        "SELECT pblob_pack('[1]', ?)",
+        (format_,),
+    )
+
     assert isinstance(result, bytes)
 
 
@@ -119,11 +136,17 @@ def test_all_explicit_formats_are_accepted(
     ],
 )
 def test_invalid_format_string_reports_exact_error(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     format_: str,
 ) -> None:
-    with pytest.raises(sqlite3.OperationalError, match=r"^invalid pblob format$"):
-        scalar(db, "SELECT pblob_pack('[1]', ?)", (format_,))
+    with pytest.raises(
+        sqlite3.OperationalError,
+        match=r"^invalid pblob format$",
+    ):
+        scalar(
+            "SELECT pblob_pack('[1]', ?)",
+            (format_,),
+        )
 
 
 @pytest.mark.parametrize(
@@ -132,22 +155,27 @@ def test_invalid_format_string_reports_exact_error(
     ids=["integer", "real", "blob"],
 )
 def test_non_text_format_reports_exact_error(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     format_value: object,
 ) -> None:
     with pytest.raises(
         sqlite3.OperationalError,
         match=r"^pblob format must be TEXT$",
     ):
-        scalar(db, "SELECT pblob_pack('[1]', ?)", (format_value,))
+        scalar(
+            "SELECT pblob_pack('[1]', ?)",
+            (format_value,),
+        )
 
 
-def test_null_explicit_format_reports_exact_error(db: sqlite3.Connection) -> None:
+def test_null_explicit_format_reports_exact_error(
+    scalar: Scalar,
+) -> None:
     with pytest.raises(
         sqlite3.OperationalError,
         match=r"^pblob format must not be NULL$",
     ):
-        scalar(db, "SELECT pblob_pack('[1]', NULL)")
+        scalar("SELECT pblob_pack('[1]', NULL)")
 
 
 @pytest.mark.parametrize(
@@ -173,9 +201,12 @@ def test_null_explicit_format_reports_exact_error(db: sqlite3.Connection) -> Non
     ids=["pack-zero", "pack-three", "unpack-zero", "unpack-two"],
 )
 def test_invalid_arity_is_rejected_by_sqlite(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     sql: str,
     message: str,
 ) -> None:
-    with pytest.raises(sqlite3.OperationalError, match=rf"^{re.escape(message)}$"):
-        scalar(db, sql)
+    with pytest.raises(
+        sqlite3.OperationalError,
+        match=rf"^{re.escape(message)}$",
+    ):
+        scalar(sql)

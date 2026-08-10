@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import json
 import math
-import sqlite3
 import struct
 
 import pytest
 
+
+Scalar = Callable[[str, tuple[object, ...]], object]
 
 FORMAT_CASES = [
     ("<f2", "<e", 2.0**-11 + 2.0**-24),
@@ -39,13 +41,12 @@ EXACT_VALUES = [
 
 
 def roundtrip(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     values: list[float],
     format_: str,
 ) -> list[float]:
     text = json.dumps(values, separators=(",", ":"))
     result = scalar(
-        db,
         "SELECT pblob_unpack(pblob_pack(?, ?))",
         (text, format_),
     )
@@ -57,11 +58,11 @@ def roundtrip(
     ["<f2", ">f2", "<f4", ">f4"],
 )
 def test_roundtrip_preserves_vector_length_and_order(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     format_: str,
 ) -> None:
     source = [-10.5, -1.25, 0.0, 0.25, 1.5, 37.75]
-    observed = roundtrip(db, source, format_)
+    observed = roundtrip(scalar, source, format_)
 
     assert len(observed) == len(source)
     assert observed == source
@@ -72,10 +73,10 @@ def test_roundtrip_preserves_vector_length_and_order(
     ["<f2", ">f2", "<f4", ">f4"],
 )
 def test_exactly_representable_values_are_lossless(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     format_: str,
 ) -> None:
-    observed = roundtrip(db, EXACT_VALUES, format_)
+    observed = roundtrip(scalar, EXACT_VALUES, format_)
 
     assert observed == EXACT_VALUES
     assert math.copysign(1.0, observed[1]) == -1.0
@@ -99,14 +100,17 @@ def test_exactly_representable_values_are_lossless(
     ],
 )
 def test_roundtrip_matches_independent_ieee_reference_exactly(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     format_: str,
     struct_format: str,
     _relative_bound: float,
     value: float,
 ) -> None:
-    observed = roundtrip(db, [value], format_)[0]
-    expected = struct.unpack(struct_format, struct.pack(struct_format, value))[0]
+    observed = roundtrip(scalar, [value], format_)[0]
+    expected = struct.unpack(
+        struct_format,
+        struct.pack(struct_format, value),
+    )[0]
 
     assert observed == expected
 
@@ -129,13 +133,13 @@ def test_roundtrip_matches_independent_ieee_reference_exactly(
     ],
 )
 def test_observed_relative_precision_loss_is_within_binary_format_bound(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     format_: str,
     _struct_format: str,
     relative_bound: float,
     value: float,
 ) -> None:
-    observed = roundtrip(db, [value], format_)[0]
+    observed = roundtrip(scalar, [value], format_)[0]
     relative_error = abs(observed - value) / abs(value)
 
     assert relative_error <= relative_bound, (
@@ -150,10 +154,10 @@ def test_observed_relative_precision_loss_is_within_binary_format_bound(
     ["<f2", ">f2"],
 )
 def test_f16_precision_loss_is_consistent_with_11_significand_bits(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     format_: str,
 ) -> None:
-    observed = roundtrip(db, PRECISION_VALUES, format_)
+    observed = roundtrip(scalar, PRECISION_VALUES, format_)
 
     errors = [
         abs(actual - original) / abs(original)
@@ -169,10 +173,10 @@ def test_f16_precision_loss_is_consistent_with_11_significand_bits(
     ["<f4", ">f4"],
 )
 def test_f32_precision_loss_is_consistent_with_24_significand_bits(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     format_: str,
 ) -> None:
-    observed = roundtrip(db, PRECISION_VALUES, format_)
+    observed = roundtrip(scalar, PRECISION_VALUES, format_)
 
     errors = [
         abs(actual - original) / abs(original)
@@ -192,12 +196,12 @@ def test_f32_precision_loss_is_consistent_with_24_significand_bits(
     ids=["little-endian", "big-endian"],
 )
 def test_f16_has_no_better_precision_than_f32_for_same_inputs(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     f16_format: str,
     f32_format: str,
 ) -> None:
-    f16 = roundtrip(db, PRECISION_VALUES, f16_format)
-    f32 = roundtrip(db, PRECISION_VALUES, f32_format)
+    f16 = roundtrip(scalar, PRECISION_VALUES, f16_format)
+    f32 = roundtrip(scalar, PRECISION_VALUES, f32_format)
 
     f16_errors = [
         abs(actual - original)
@@ -210,11 +214,19 @@ def test_f16_has_no_better_precision_than_f32_for_same_inputs(
 
     assert all(
         half_error >= single_error
-        for half_error, single_error in zip(f16_errors, f32_errors, strict=True)
+        for half_error, single_error in zip(
+            f16_errors,
+            f32_errors,
+            strict=True,
+        )
     )
     assert any(
         half_error > single_error
-        for half_error, single_error in zip(f16_errors, f32_errors, strict=True)
+        for half_error, single_error in zip(
+            f16_errors,
+            f32_errors,
+            strict=True,
+        )
     )
 
 
@@ -245,14 +257,17 @@ def test_f16_has_no_better_precision_than_f32_for_same_inputs(
     ids=["f16-le", "f16-be", "f32-le", "f32-be"],
 )
 def test_roundtrip_ieee_boundary_values(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     format_: str,
     struct_format: str,
     values: list[float],
 ) -> None:
-    observed = roundtrip(db, values, format_)
+    observed = roundtrip(scalar, values, format_)
     expected = [
-        struct.unpack(struct_format, struct.pack(struct_format, value))[0]
+        struct.unpack(
+            struct_format,
+            struct.pack(struct_format, value),
+        )[0]
         for value in values
     ]
 
@@ -264,20 +279,24 @@ def test_roundtrip_ieee_boundary_values(
     ["<f2", ">f2", "<f4", ">f4"],
 )
 def test_large_vector_roundtrip(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     format_: str,
 ) -> None:
-    values = [((i - 256) / 37.0) for i in range(512)]
-    observed = roundtrip(db, values, format_)
+    values = [(i - 256) / 37.0 for i in range(512)]
+    observed = roundtrip(scalar, values, format_)
 
     assert len(observed) == 512
 
     type_char = "e" if format_.endswith("2") else "f"
     prefix = "<" if format_.startswith("<") else ">"
     reference_format = prefix + type_char
+
     expected = [
-        struct.unpack(reference_format, struct.pack(reference_format, x))[0]
-        for x in values
+        struct.unpack(
+            reference_format,
+            struct.pack(reference_format, value),
+        )[0]
+        for value in values
     ]
 
     assert observed == expected

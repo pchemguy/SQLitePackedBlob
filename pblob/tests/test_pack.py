@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import json
-import re
 import sqlite3
 import struct
 
 import pytest
 
+
+Scalar = Callable[[str, tuple[object, ...]], object]
 
 FORMAT_CASES = [
     ("<f2", "<e", 0x01, 2),
@@ -24,7 +26,7 @@ FORMAT_CASES = [
     ids=[case[0] for case in FORMAT_CASES],
 )
 def test_pack_exact_payload_bytes_and_trailer(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     format_: str,
     struct_format: str,
     tag: int,
@@ -33,9 +35,15 @@ def test_pack_exact_payload_bytes_and_trailer(
     values = [0.0, -0.0, 1.0, -2.0, 1.5, 0.1, 123.25]
     text = json.dumps(values, separators=(",", ":"))
 
-    observed = scalar(db, "SELECT pblob_pack(?, ?)", (text, format_))
+    observed = scalar(
+        "SELECT pblob_pack(?, ?)",
+        (text, format_),
+    )
 
-    expected_payload = b"".join(struct.pack(struct_format, x) for x in values)
+    expected_payload = b"".join(
+        struct.pack(struct_format, value)
+        for value in values
+    )
     expected = expected_payload + bytes([tag]) * 4
 
     assert observed == expected
@@ -52,21 +60,30 @@ def test_pack_exact_payload_bytes_and_trailer(
     ],
 )
 def test_empty_vector_is_trailer_only(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     format_: str,
     tag: int,
     element_size: int,
 ) -> None:
-    observed = scalar(db, "SELECT pblob_pack('[]', ?)", (format_,))
+    observed = scalar(
+        "SELECT pblob_pack('[]', ?)",
+        (format_,),
+    )
 
     assert observed == bytes([tag]) * 4
     assert len(observed) == 4
     assert (len(observed) - 4) % element_size == 0
 
 
-def test_default_pack_format_is_big_endian_f16(db: sqlite3.Connection) -> None:
-    default_blob = scalar(db, "SELECT pblob_pack('[1.25,-2.5]')")
-    explicit_blob = scalar(db, "SELECT pblob_pack('[1.25,-2.5]', '>f2')")
+def test_default_pack_format_is_big_endian_f16(
+    scalar: Scalar,
+) -> None:
+    default_blob = scalar(
+        "SELECT pblob_pack('[1.25,-2.5]')",
+    )
+    explicit_blob = scalar(
+        "SELECT pblob_pack('[1.25,-2.5]', '>f2')",
+    )
 
     assert default_blob == explicit_blob
     assert default_blob[-4:] == b"\x03\x03\x03\x03"
@@ -84,14 +101,17 @@ def test_default_pack_format_is_big_endian_f16(db: sqlite3.Connection) -> None:
     ],
 )
 def test_pack_requires_top_level_array(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     json_text: str,
 ) -> None:
     with pytest.raises(
         sqlite3.OperationalError,
         match=r"^pblob_pack\(\) expects a JSON array$",
     ):
-        scalar(db, "SELECT pblob_pack(?)", (json_text,))
+        scalar(
+            "SELECT pblob_pack(?)",
+            (json_text,),
+        )
 
 
 @pytest.mark.parametrize(
@@ -108,14 +128,17 @@ def test_pack_requires_top_level_array(
     ],
 )
 def test_pack_rejects_non_numeric_array_elements(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     json_text: str,
 ) -> None:
     with pytest.raises(
         sqlite3.OperationalError,
         match=r"^JSON array must contain only ordinary numbers$",
     ):
-        scalar(db, "SELECT pblob_pack(?)", (json_text,))
+        scalar(
+            "SELECT pblob_pack(?)",
+            (json_text,),
+        )
 
 
 @pytest.mark.parametrize(
@@ -133,14 +156,17 @@ def test_pack_rejects_non_numeric_array_elements(
     ],
 )
 def test_pack_rejects_json5_input(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     json_text: str,
 ) -> None:
     with pytest.raises(
         sqlite3.OperationalError,
         match=r"^pblob_pack\(\) requires canonical JSON$",
     ):
-        scalar(db, "SELECT pblob_pack(?)", (json_text,))
+        scalar(
+            "SELECT pblob_pack(?)",
+            (json_text,),
+        )
 
 
 @pytest.mark.parametrize(
@@ -155,11 +181,17 @@ def test_pack_rejects_json5_input(
     ],
 )
 def test_malformed_json_reports_sqlite_json_error(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     json_text: str,
 ) -> None:
-    with pytest.raises(sqlite3.OperationalError, match=r"^malformed JSON$"):
-        scalar(db, "SELECT pblob_pack(?)", (json_text,))
+    with pytest.raises(
+        sqlite3.OperationalError,
+        match=r"^malformed JSON$",
+    ):
+        scalar(
+            "SELECT pblob_pack(?)",
+            (json_text,),
+        )
 
 
 @pytest.mark.parametrize(
@@ -172,7 +204,7 @@ def test_malformed_json_reports_sqlite_json_error(
     ],
 )
 def test_pack_rejects_values_that_narrow_to_non_finite(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     format_: str,
     json_text: str,
 ) -> None:
@@ -180,7 +212,10 @@ def test_pack_rejects_values_that_narrow_to_non_finite(
         sqlite3.OperationalError,
         match=r"^numeric value out of range for pblob format$",
     ):
-        scalar(db, "SELECT pblob_pack(?, ?)", (json_text, format_))
+        scalar(
+            "SELECT pblob_pack(?, ?)",
+            (json_text, format_),
+        )
 
 
 @pytest.mark.parametrize(
@@ -203,18 +238,18 @@ def test_pack_rejects_values_that_narrow_to_non_finite(
     ],
 )
 def test_pack_finite_boundaries_match_python_ieee_reference(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     format_: str,
     struct_format: str,
     value: float,
 ) -> None:
     blob = scalar(
-        db,
         "SELECT pblob_pack(?, ?)",
         (json.dumps([value]), format_),
     )
 
     expected = struct.pack(struct_format, value)
+
     assert blob[:-4] == expected
 
 
@@ -228,13 +263,12 @@ def test_pack_finite_boundaries_match_python_ieee_reference(
     ],
 )
 def test_underflow_is_encoded_not_reported_as_error(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     format_: str,
     struct_format: str,
     value: float,
 ) -> None:
     blob = scalar(
-        db,
         "SELECT pblob_pack(?, ?)",
         (json.dumps([value]), format_),
     )

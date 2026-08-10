@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import json
 import math
 import sqlite3
@@ -9,6 +10,8 @@ import struct
 
 import pytest
 
+
+Scalar = Callable[[str, tuple[object, ...]], object]
 
 FORMAT_CASES = [
     ("<f2", "<e", 0x01),
@@ -24,19 +27,29 @@ FORMAT_CASES = [
     ids=[case[0] for case in FORMAT_CASES],
 )
 def test_unpack_external_ieee_payload(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     format_: str,
     struct_format: str,
     tag: int,
 ) -> None:
     source_values = [0.0, -0.0, 1.0, -2.0, 0.1, 1.0 / 3.0, 123.25]
-    payload = b"".join(struct.pack(struct_format, x) for x in source_values)
+    payload = b"".join(
+        struct.pack(struct_format, x)
+        for x in source_values
+    )
     blob = payload + bytes([tag]) * 4
 
-    text = scalar(db, "SELECT pblob_unpack(?)", (sqlite3.Binary(blob),))
+    text = scalar(
+        "SELECT pblob_unpack(?)",
+        (sqlite3.Binary(blob),),
+    )
+
     observed = json.loads(text)
     expected = [
-        struct.unpack(struct_format, struct.pack(struct_format, x))[0]
+        struct.unpack(
+            struct_format,
+            struct.pack(struct_format, x),
+        )[0]
         for x in source_values
     ]
 
@@ -50,20 +63,22 @@ def test_unpack_external_ieee_payload(
     ids=["f2-le", "f2-be", "f4-le", "f4-be"],
 )
 def test_unpack_trailer_only_blob_returns_empty_array(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     tag: int,
 ) -> None:
     blob = bytes([tag]) * 4
 
-    assert scalar(db, "SELECT pblob_unpack(?)", (sqlite3.Binary(blob),)) == "[]"
+    assert scalar(
+        "SELECT pblob_unpack(?)",
+        (sqlite3.Binary(blob),),
+    ) == "[]"
 
 
 def test_unpack_result_is_json_text_with_array_subtype_semantics(
-    db: sqlite3.Connection,
+    scalar: Scalar,
 ) -> None:
     assert scalar(
-        db,
-        "SELECT json_type(pblob_unpack(pblob_pack('[1,2,3]', '<f4')))",
+        "SELECT json_type(pblob_unpack(pblob_pack('[1,2,3]', '<f4')))"
     ) == "array"
 
 
@@ -77,14 +92,17 @@ def test_unpack_result_is_json_text_with_array_subtype_semantics(
     ],
 )
 def test_unpack_rejects_blob_shorter_than_trailer(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     blob: bytes,
 ) -> None:
     with pytest.raises(
         sqlite3.OperationalError,
         match=r"^pblob BLOB is too short$",
     ):
-        scalar(db, "SELECT pblob_unpack(?)", (sqlite3.Binary(blob),))
+        scalar(
+            "SELECT pblob_unpack(?)",
+            (sqlite3.Binary(blob),),
+        )
 
 
 @pytest.mark.parametrize(
@@ -97,14 +115,17 @@ def test_unpack_rejects_blob_shorter_than_trailer(
     ],
 )
 def test_unpack_rejects_non_repeated_trailer(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     trailer: bytes,
 ) -> None:
     with pytest.raises(
         sqlite3.OperationalError,
         match=r"^invalid pblob format trailer$",
     ):
-        scalar(db, "SELECT pblob_unpack(?)", (sqlite3.Binary(trailer),))
+        scalar(
+            "SELECT pblob_unpack(?)",
+            (sqlite3.Binary(trailer),),
+        )
 
 
 @pytest.mark.parametrize(
@@ -112,7 +133,7 @@ def test_unpack_rejects_non_repeated_trailer(
     [0x00, 0x02, 0x04, 0x06, 0x08, 0x09, 0xFF],
 )
 def test_unpack_rejects_unknown_repeated_tag(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     tag: int,
 ) -> None:
     blob = bytes([tag]) * 4
@@ -121,39 +142,45 @@ def test_unpack_rejects_unknown_repeated_tag(
         sqlite3.OperationalError,
         match=r"^invalid pblob format metadata$",
     ):
-        scalar(db, "SELECT pblob_unpack(?)", (sqlite3.Binary(blob),))
+        scalar(
+            "SELECT pblob_unpack(?)",
+            (sqlite3.Binary(blob),),
+        )
 
 
 @pytest.mark.parametrize(
     "blob",
     [
-        b"\x00" + b"\x01" * 4,       # 1 byte payload for f2
-        b"\x00\x00\x00" + b"\x01" * 4,  # 3-byte payload for f2
-        b"\x00" + b"\x05" * 4,       # 1 byte payload for f4
-        b"\x00\x00" + b"\x07" * 4,  # 2-byte payload for f4
+        b"\x00" + b"\x01" * 4,          # 1-byte payload for f2
+        b"\x00\x00\x00" + b"\x01" * 4, # 3-byte payload for f2
+        b"\x00" + b"\x05" * 4,          # 1-byte payload for f4
+        b"\x00\x00" + b"\x07" * 4,     # 2-byte payload for f4
     ],
     ids=["f2-one-byte", "f2-three-byte", "f4-one-byte", "f4-two-byte"],
 )
 def test_unpack_rejects_payload_size_not_divisible_by_element_size(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     blob: bytes,
 ) -> None:
     with pytest.raises(
         sqlite3.OperationalError,
         match=r"^invalid pblob payload size$",
     ):
-        scalar(db, "SELECT pblob_unpack(?)", (sqlite3.Binary(blob),))
+        scalar(
+            "SELECT pblob_unpack(?)",
+            (sqlite3.Binary(blob),),
+        )
 
 
 @pytest.mark.parametrize(
     ("payload", "tag"),
     [
-        (struct.pack("<H", 0x7C00), 0x01),  # +Inf f16 LE
-        (struct.pack(">H", 0xFC00), 0x03),  # -Inf f16 BE
-        (struct.pack("<H", 0x7E00), 0x01),  # NaN f16 LE
-        (struct.pack(">I", 0x7F800000), 0x07),  # +Inf f32 BE
-        (struct.pack("<I", 0xFF800000), 0x05),  # -Inf f32 LE
-        (struct.pack(">I", 0x7FC00000), 0x07),  # NaN f32 BE
+        (struct.pack("<H", 0x7C00), 0x01),     # +Inf f16 LE
+        (struct.pack(">H", 0xFC00), 0x03),     # -Inf f16 BE
+        (struct.pack("<H", 0x7E00), 0x01),     # NaN f16 LE
+        (struct.pack(">I", 0x7F800000), 0x07), # +Inf f32 BE
+        (struct.pack("<I", 0xFF800000), 0x05), # -Inf f32 LE
+        (struct.pack(">I", 0x7FC00000), 0x07), # NaN f32 BE
     ],
     ids=[
         "f16-pos-inf",
@@ -165,7 +192,7 @@ def test_unpack_rejects_payload_size_not_divisible_by_element_size(
     ],
 )
 def test_unpack_rejects_non_finite_external_payload(
-    db: sqlite3.Connection,
+    scalar: Scalar,
     payload: bytes,
     tag: int,
 ) -> None:
@@ -175,4 +202,7 @@ def test_unpack_rejects_non_finite_external_payload(
         sqlite3.OperationalError,
         match=r"^pblob contains non-finite value$",
     ):
-        scalar(db, "SELECT pblob_unpack(?)", (sqlite3.Binary(blob),))
+        scalar(
+            "SELECT pblob_unpack(?)",
+            (sqlite3.Binary(blob),),
+        )
