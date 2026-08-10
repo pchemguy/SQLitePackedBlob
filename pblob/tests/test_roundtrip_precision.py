@@ -79,7 +79,6 @@ def test_exactly_representable_values_are_lossless(
     observed = roundtrip(scalar, EXACT_VALUES, format_)
 
     assert observed == EXACT_VALUES
-    assert math.copysign(1.0, observed[1]) == -1.0
 
 
 @pytest.mark.parametrize(

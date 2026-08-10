@@ -274,3 +274,29 @@ def test_underflow_is_encoded_not_reported_as_error(
     )
 
     assert blob[:-4] == struct.pack(struct_format, value)
+
+
+@pytest.mark.parametrize(
+    ("format_", "struct_format", "tag"),
+    [
+        ("<f2", "<e", 0x01),
+        (">f2", ">e", 0x03),
+        ("<f4", "<f", 0x05),
+        (">f4", ">f", 0x07),
+    ],
+)
+def test_pack_preserves_negative_zero_bit_pattern(
+    scalar,
+    format_: str,
+    struct_format: str,
+    tag: int,
+) -> None:
+    blob = scalar(
+        "SELECT pblob_pack('[-0.0]', ?)",
+        (format_,),
+    )
+
+    expected_payload = struct.pack(struct_format, -0.0)
+
+    assert blob[:-4] == expected_payload
+    assert blob[-4:] == bytes([tag]) * 4

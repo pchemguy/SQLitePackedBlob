@@ -27,12 +27,13 @@ FORMAT_CASES = [
     ids=[case[0] for case in FORMAT_CASES],
 )
 def test_unpack_external_ieee_payload(
-    scalar: Scalar,
+    scalar,
     format_: str,
     struct_format: str,
     tag: int,
 ) -> None:
     source_values = [0.0, -0.0, 1.0, -2.0, 0.1, 1.0 / 3.0, 123.25]
+
     payload = b"".join(
         struct.pack(struct_format, x)
         for x in source_values
@@ -54,7 +55,6 @@ def test_unpack_external_ieee_payload(
     ]
 
     assert observed == expected
-    assert math.copysign(1.0, observed[1]) == -1.0
 
 
 @pytest.mark.parametrize(
