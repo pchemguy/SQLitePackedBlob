@@ -211,7 +211,7 @@ For tested normal values, the suite verifies approximately:
 
 ```text
 f4 relative error <= 2^-24
-f2 relative error <= 2^-11
+f2 relative error <= 2^-11 (ignoring lower order contribution due to the two-stage transformation)
 ```
 
 Use `f2` where storage density is more important than precision and `f4` where substantially greater numeric precision is required.
