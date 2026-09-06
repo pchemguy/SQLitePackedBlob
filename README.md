@@ -333,4 +333,4 @@ That repository provides the broader development pattern used here, including:
 
 `SQLitePackedBlob` applies that template to a concrete extension and intentionally focuses its tests on the SQLite-facing contract.
 
-Detailed documentation of the underlying Windows/MSVC extended-amalgamation build process is maintained separately in the [SQLite MSVC Build field note](https://github.com/pchemguy/Field-Notes/tree/main/11-sqlite-msvc-build).
+Detailed documentation of the underlying Windows/MSVC extended-amalgamation build process is maintained separately in the [SQLite MSVC Build field note](https://github.com/pchemguy/Field-Notes/tree/main/notes/11-sqlite-msvc-build).
