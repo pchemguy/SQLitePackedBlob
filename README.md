@@ -15,6 +15,12 @@ It is intended primarily for storing embedding vectors and similar numeric array
 
 The extension is integrated directly into a customized SQLite amalgamation and registered as an auto-extension.
 
+> [!IMPORTANT]
+> 
+> **AI-Assisted Development Disclosure**
+> 
+> This project has been developed with extensive generative-AI assistance. Assistance covered project exploration, design discussion, specification development, implementation, testing, technical review, and documentation. See [AI_DISCLOSURE.md](AI_DISCLOSURE.md) for further details. Responsibility for the published software remains with the maintainer.
+
 ## SQL API
 
 `pblob` provides three scalar-function signatures:
