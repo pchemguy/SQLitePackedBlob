@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import sqlite3
+import sys
 from collections.abc import Callable, Iterator
+from contextlib import closing
 
 import pytest
 
@@ -20,21 +22,18 @@ def db() -> Iterator[sqlite3.Connection]:
     extension is loaded here: all tests exercise the same SQL surface that
     production callers use.
     """
-    connection = sqlite3.connect(":memory:")
-
-    try:
-        connection.execute("SELECT pblob_unpack(pblob_pack('[]'))").fetchone()
-    except sqlite3.Error as exc:
-        connection.close()
-        pytest.fail(
-            "pblob SQL functions are not available in the sqlite3 runtime "
-            f"used by this test process: {exc}"
-        )
-
-    try:
+    with closing(sqlite3.connect(":memory:")) as connection:
+        try:
+            connection.execute(
+                "EXPLAIN SELECT pblob_pack(NULL), pblob_pack(NULL, NULL), pblob_unpack(NULL)"
+            )
+        except sqlite3.OperationalError as exc:
+            pytest.fail(
+                f"{sys.executable} (SQLite {sqlite3.sqlite_version}) could not resolve "
+                f"the pblob SQL functions: {exc}. See pblob/tests/README.md.",
+                pytrace=False,
+            )
         yield connection
-    finally:
-        connection.close()
 
 
 @pytest.fixture

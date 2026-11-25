@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import json
-import math
 import sqlite3
 import struct
 
@@ -74,12 +73,28 @@ def test_unpack_trailer_only_blob_returns_empty_array(
     ) == "[]"
 
 
-def test_unpack_result_is_json_text_with_array_subtype_semantics(
+def test_unpack_result_embeds_as_a_json_array(
     scalar: Scalar,
 ) -> None:
-    assert scalar(
-        "SELECT json_type(pblob_unpack(pblob_pack('[1,2,3]', '<f4')))"
-    ) == "array"
+    text = scalar("SELECT json_array(pblob_unpack(pblob_pack('[1,2,3]')))")
+    assert json.loads(text) == [[1, 2, 3]]
+
+
+def test_unpack_preserves_json_subtype_with_expression_index(
+    db: sqlite3.Connection,
+) -> None:
+    db.execute("CREATE TABLE vectors (payload BLOB)")
+    db.execute("INSERT INTO vectors VALUES (pblob_pack('[1,2]'))")
+    db.execute("CREATE INDEX unpacked ON vectors(pblob_unpack(payload))")
+
+    (text,) = db.execute(
+        """
+        SELECT json_array(pblob_unpack(payload))
+        FROM vectors INDEXED BY unpacked
+        ORDER BY pblob_unpack(payload)
+        """
+    ).fetchone()
+    assert json.loads(text) == [[1, 2]]
 
 
 @pytest.mark.parametrize(
