@@ -620,7 +620,7 @@ static int pblobRegister(sqlite3 *db) {
     if (rc != SQLITE_OK) {return rc;}
 
     return sqlite3_create_function_v2(
-        db, "pblob_unpack", 1, flags, 0,
+        db, "pblob_unpack", 1, flags | SQLITE_RESULT_SUBTYPE, 0,
         pblobUnpackFunc, 0, 0, 0
     );
 }

@@ -53,6 +53,13 @@ def roundtrip(
     return json.loads(result)
 
 
+def ieee_reference(value: float, struct_format: str) -> float:
+    """Apply the binary32 rounding step before conversion to binary16."""
+    if struct_format.endswith("e"):
+        (value,) = struct.unpack("=f", struct.pack("=f", value))
+    return struct.unpack(struct_format, struct.pack(struct_format, value))[0]
+
+
 @pytest.mark.parametrize(
     "format_",
     ["<f2", ">f2", "<f4", ">f4"],
@@ -106,12 +113,21 @@ def test_roundtrip_matches_independent_ieee_reference_exactly(
     value: float,
 ) -> None:
     observed = roundtrip(scalar, [value], format_)[0]
-    expected = struct.unpack(
-        struct_format,
-        struct.pack(struct_format, value),
-    )[0]
+    expected = ieee_reference(value, struct_format)
 
     assert observed == expected
+
+
+@pytest.mark.parametrize(("format_", "struct_format"), [("<f2", "<e"), (">f2", ">e")])
+def test_f16_rounds_through_binary32_at_halfway_points(
+    scalar: Scalar, format_: str, struct_format: str
+) -> None:
+    # The inputs lie on opposite sides of two binary16 midpoints.
+    # Both become exact midpoints in binary32, then round to even in binary16.
+    values = [1.0 + 2.0**-11 + 2.0**-30, 1.0 + 3.0 * 2.0**-11 - 2.0**-30]
+    expected = [ieee_reference(x, struct_format) for x in values]
+    assert expected == [1.0, 1.0 + 2.0**-9]
+    assert roundtrip(scalar, values, format_) == expected
 
 
 @pytest.mark.parametrize(
@@ -262,13 +278,7 @@ def test_roundtrip_ieee_boundary_values(
     values: list[float],
 ) -> None:
     observed = roundtrip(scalar, values, format_)
-    expected = [
-        struct.unpack(
-            struct_format,
-            struct.pack(struct_format, value),
-        )[0]
-        for value in values
-    ]
+    expected = [ieee_reference(value, struct_format) for value in values]
 
     assert observed == expected
 
@@ -290,12 +300,6 @@ def test_large_vector_roundtrip(
     prefix = "<" if format_.startswith("<") else ">"
     reference_format = prefix + type_char
 
-    expected = [
-        struct.unpack(
-            reference_format,
-            struct.pack(reference_format, value),
-        )[0]
-        for value in values
-    ]
+    expected = [ieee_reference(value, reference_format) for value in values]
 
     assert observed == expected

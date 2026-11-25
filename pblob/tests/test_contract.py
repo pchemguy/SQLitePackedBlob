@@ -15,19 +15,23 @@ FORMATS = ("<f2", ">f2", "<f4", ">f4")
 
 
 def test_registered_sql_variants(db: sqlite3.Connection) -> None:
+    deterministic = 0x800
+    innocuous = 0x200000
+    required_flags = deterministic | innocuous
     rows = db.execute(
         """
-        SELECT name, narg
+        SELECT name, builtin, type, enc, narg, flags & ?
         FROM pragma_function_list
         WHERE name IN ('pblob_pack', 'pblob_unpack')
         ORDER BY name, narg
-        """
+        """,
+        (required_flags,),
     ).fetchall()
 
     assert rows == [
-        ("pblob_pack", 1),
-        ("pblob_pack", 2),
-        ("pblob_unpack", 1),
+        ("pblob_pack", 0, "s", "utf8", 1, required_flags),
+        ("pblob_pack", 0, "s", "utf8", 2, required_flags),
+        ("pblob_unpack", 0, "s", "utf8", 1, required_flags),
     ]
 
 
@@ -53,9 +57,10 @@ def test_sql_result_types(
     [
         "SELECT pblob_pack(NULL)",
         "SELECT pblob_pack(NULL, '<f2')",
+        "SELECT pblob_pack(NULL, NULL)",
         "SELECT pblob_unpack(NULL)",
     ],
-    ids=["pack-default", "pack-explicit", "unpack"],
+    ids=["pack-default", "pack-explicit", "pack-both-null", "unpack"],
 )
 def test_null_propagation(
     scalar: Scalar,
